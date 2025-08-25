@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'OpenTelemetry Lambda function with OpenObserve integration'
+
+Parameters:
+  OpenObserveEndpoint:
+    Type: String
+    Description: OpenObserve base endpoint URL (without /api/org part)
+    Default: "https://api.openobserve.ai"
+  
+  OpenObserveUsername:
+    Type: String
+    Description: OpenObserve username
+    Default: "root@example.com"
+  
+  OpenObservePassword:
+    Type: String
+    Description: OpenObserve password
+    NoEcho: true
+  
+  OpenObserveOrganization:
+    Type: String
+    Description: OpenObserve organization name (from your endpoint URL)
+    Default: "prabhat_organization_2512_r6EinDy3fpExW1M"
+  
+  OpenObserveStream:
+    Type: String
+    Description: OpenObserve stream name
+    Default: "default"
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs18.x
+    Environment:
+      Variables:
+        # OpenTelemetry configuration
+        AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+        OTEL_LAMBDA_DISABLE_AWS_CONTEXT_PROPAGATION: true
+        OTEL_PROPAGATORS: tracecontext
+        OTEL_EXPORTER_OTLP_ENDPOINT: !Sub "${OpenObserveEndpoint}/api/${OpenObserveOrganization}"
+        OTEL_SERVICE_NAME: lambda-openobserve-demo
+        OTEL_SERVICE_VERSION: "1.0.0"
+        OTEL_RESOURCE_ATTRIBUTES: "service.name=lambda-openobserve-demo,service.version=1.0.0"
+        # Additional OpenObserve configuration
+        OPENOBSERVE_BASE_ENDPOINT: !Ref OpenObserveEndpoint
+        OPENOBSERVE_USERNAME: !Ref OpenObserveUsername
+        OPENOBSERVE_PASSWORD: !Ref OpenObservePassword
+        OPENOBSERVE_ORGANIZATION: !Ref OpenObserveOrganization
+        OPENOBSERVE_STREAM: !Ref OpenObserveStream
+    Layers:
+      - !Sub "arn:aws:lambda:${AWS::Region}:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:1"
+
+Resources:
+  # Main Lambda function
+  DemoLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-demo-function"
+      CodeUri: src/
+      Handler: index.handler
+
+  # API Gateway for triggering the Lambda
+  DemoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  # API Gateway endpoint
+  DemoApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-api-function"
+      CodeUri: src/
+      Handler: api.handler
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DemoApi
+            Path: /demo
+            Method: get
+
+  # CloudWatch Log Group with retention
+  DemoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-demo-function"
+      RetentionInDays: 7
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api-function"
+      RetentionInDays: 7
+
+Outputs:
+  DemoApiUrl:
+    Description: "Demo API Gateway endpoint URL"
+    Value: !Sub "https://${DemoApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/demo"
+    
+  DemoFunctionName:
+    Description: "Demo Lambda Function Name"
+    Value: !Ref DemoLambdaFunction
+    
+  ApiFunctionName:
+    Description: "API Lambda Function Name"
+    Value: !Ref DemoApiFunction

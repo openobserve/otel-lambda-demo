@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: 'OpenTelemetry Lambda function with OpenObserve integration'
+Description: 'Python OpenTelemetry Lambda function with OpenObserve integration'
 
 Parameters:
   OpenObserveEndpoint:
@@ -11,7 +11,7 @@ Parameters:
   OpenObserveUsername:
     Type: String
     Description: OpenObserve username
-    Default: "root@example.com"
+    Default: "chaitanya@openobserve.ai"
   
   OpenObservePassword:
     Type: String
@@ -26,23 +26,24 @@ Parameters:
   OpenObserveStream:
     Type: String
     Description: OpenObserve stream name
-    Default: "default"
+    Default: "lambda"
 
 Globals:
   Function:
     Timeout: 30
     MemorySize: 512
-    Runtime: nodejs18.x
+    Runtime: python3.11
     Environment:
       Variables:
         # OpenTelemetry configuration
-        AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
-        OTEL_LAMBDA_DISABLE_AWS_CONTEXT_PROPAGATION: true
-        OTEL_PROPAGATORS: tracecontext
+        AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-instrument
+        OTEL_LAMBDA_DISABLE_AWS_CONTEXT_PROPAGATION: "true"
+        OTEL_PROPAGATORS: "tracecontext"
         OTEL_EXPORTER_OTLP_ENDPOINT: !Sub "${OpenObserveEndpoint}/api/${OpenObserveOrganization}"
-        OTEL_SERVICE_NAME: lambda-openobserve-demo
+        OTEL_SERVICE_NAME: "python-lambda-openobserve-demo"
         OTEL_SERVICE_VERSION: "1.0.0"
-        OTEL_RESOURCE_ATTRIBUTES: "service.name=lambda-openobserve-demo,service.version=1.0.0"
+        OTEL_RESOURCE_ATTRIBUTES: "service.name=python-lambda-openobserve-demo,service.version=1.0.0"
+        OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
         # Additional OpenObserve configuration
         OPENOBSERVE_BASE_ENDPOINT: !Ref OpenObserveEndpoint
         OPENOBSERVE_USERNAME: !Ref OpenObserveUsername
@@ -50,16 +51,16 @@ Globals:
         OPENOBSERVE_ORGANIZATION: !Ref OpenObserveOrganization
         OPENOBSERVE_STREAM: !Ref OpenObserveStream
     Layers:
-      - !Sub "arn:aws:lambda:${AWS::Region}:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:1"
+      - !Sub "arn:aws:lambda:${AWS::Region}:615299751070:layer:AWSOpenTelemetryDistroPython:11"
 
 Resources:
   # Main Lambda function
   DemoLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-demo-function"
-      CodeUri: src/
-      Handler: index.handler
+      FunctionName: !Sub "${AWS::StackName}-py-demo-function"
+      CodeUri: python_src/
+      Handler: lambda_function.lambda_handler
 
   # API Gateway for triggering the Lambda
   DemoApi:
@@ -75,9 +76,9 @@ Resources:
   DemoApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-api-function"
-      CodeUri: src/
-      Handler: api.handler
+      FunctionName: !Sub "${AWS::StackName}-py-api-function"
+      CodeUri: python_src/
+      Handler: api_handler.lambda_handler
       Events:
         ApiEvent:
           Type: Api
@@ -90,13 +91,13 @@ Resources:
   DemoLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-demo-function"
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-py-demo-function"
       RetentionInDays: 7
 
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api-function"
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-py-api-function"
       RetentionInDays: 7
 
 Outputs:

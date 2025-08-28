@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# deploy.sh - Deployment script for OpenTelemetry Lambda with OpenObserve
-# Usage: ./deploy.sh [--profile PROFILE_NAME] [--region REGION]
+# python-deploy.sh - Deployment script for Python OpenTelemetry Lambda with OpenObserve
 
 set -e
 
@@ -30,21 +29,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "🚀 Deploying Lambda OpenTelemetry with OpenObserve integration..."
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-#!/bin/bash
-
-# deploy.sh - Deployment script for OpenTelemetry Lambda with OpenObserve
-
-set -e
-
-echo "🚀 Deploying Lambda OpenTelemetry with OpenObserve integration..."
+echo "🐍 Deploying Python Lambda OpenTelemetry with OpenObserve integration..."
 
 # Colors for output
 RED='\033[0;31m'
@@ -90,29 +75,32 @@ get_aws_profile() {
         fi
     fi
     
-    # List available profiles
-    print_info "Available AWS profiles:"
-    aws configure list-profiles 2>/dev/null | sed 's/^/  - /' || {
-        print_warning "No AWS profiles found or AWS CLI not configured"
-        echo "  You can continue with default credentials or configure a profile first"
-    }
-    
-    echo
-    read -p "Enter AWS profile name (press Enter for default credentials): " AWS_PROFILE_INPUT
-    
-    if [ -n "$AWS_PROFILE_INPUT" ]; then
-        # Validate the profile exists
-        if aws configure list-profiles 2>/dev/null | grep -q "^${AWS_PROFILE_INPUT}$"; then
-            export AWS_PROFILE="$AWS_PROFILE_INPUT"
-            print_status "Using AWS profile: $AWS_PROFILE"
+    # If no profile set, prompt for selection
+    if [ -z "$AWS_PROFILE" ]; then
+        # List available profiles
+        print_info "Available AWS profiles:"
+        aws configure list-profiles 2>/dev/null | sed 's/^/  - /' || {
+            print_warning "No AWS profiles found or AWS CLI not configured"
+            echo "  You can continue with default credentials or configure a profile first"
+        }
+        
+        echo
+        read -p "Enter AWS profile name (press Enter for default credentials): " AWS_PROFILE_INPUT
+        
+        if [ -n "$AWS_PROFILE_INPUT" ]; then
+            # Validate the profile exists
+            if aws configure list-profiles 2>/dev/null | grep -q "^${AWS_PROFILE_INPUT}$"; then
+                export AWS_PROFILE="$AWS_PROFILE_INPUT"
+                print_status "Using AWS profile: $AWS_PROFILE"
+            else
+                print_error "Profile '$AWS_PROFILE_INPUT' not found!"
+                echo "Available profiles:"
+                aws configure list-profiles 2>/dev/null | sed 's/^/  - /'
+                exit 1
+            fi
         else
-            print_error "Profile '$AWS_PROFILE_INPUT' not found!"
-            echo "Available profiles:"
-            aws configure list-profiles 2>/dev/null | sed 's/^/  - /'
-            exit 1
+            print_status "Using default AWS credentials"
         fi
-    else
-        print_status "Using default AWS credentials"
     fi
     
     # Test AWS credentials
@@ -159,8 +147,16 @@ check_prerequisites() {
         exit 1
     fi
     
-    if ! command -v node &> /dev/null; then
-        print_error "Node.js is not installed. Please install Node.js 18 or later."
+    if ! command -v python3 &> /dev/null; then
+        print_error "Python 3 is not installed. Please install Python 3.11 or later."
+        exit 1
+    fi
+    
+    # Check Python version
+    PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    REQUIRED_VERSION="3.8"
+    if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$PYTHON_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+        print_error "Python version $PYTHON_VERSION is too old. Please install Python 3.8 or later."
         exit 1
     fi
     
@@ -187,8 +183,8 @@ get_openobserve_config() {
     # Stream name
     echo
     echo "📊 OpenObserve Stream"
-    read -p "Enter your OpenObserve stream name (default: default): " OPENOBSERVE_STREAM
-    OPENOBSERVE_STREAM=${OPENOBSERVE_STREAM:-"default"}
+    read -p "Enter your OpenObserve stream name (default: lambda): " OPENOBSERVE_STREAM
+    OPENOBSERVE_STREAM=${OPENOBSERVE_STREAM:-"lambda"}
     
     # Username
     echo
@@ -225,7 +221,7 @@ get_openobserve_config() {
 
 # Deploy the stack
 deploy_stack() {
-    print_status "Building SAM application..."
+    print_status "Building Python SAM application..."
     
     # Build with profile if set
     if [ -n "$AWS_PROFILE" ]; then
@@ -234,18 +230,22 @@ deploy_stack() {
         sam build
     fi
     
-    print_status "Deploying SAM application..."
+    print_status "Deploying Python SAM application..."
     
     # Check if this is first deployment
-    STACK_NAME="lambda-opentelemetry-openobserve-demo"
+    STACK_NAME="py-lambda-otel-openobserve-demo"
     
-    # Use profile for AWS CLI commands if set
+    # Use profile and region for AWS CLI commands
     AWS_CLI_PROFILE=""
+    AWS_CLI_REGION=""
     if [ -n "$AWS_PROFILE" ]; then
         AWS_CLI_PROFILE="--profile $AWS_PROFILE"
     fi
+    if [ -n "$AWS_REGION" ]; then
+        AWS_CLI_REGION="--region $AWS_REGION"
+    fi
     
-    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" $AWS_CLI_PROFILE &> /dev/null; then
+    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" $AWS_CLI_PROFILE $AWS_CLI_REGION &> /dev/null; then
         print_status "Stack exists, updating..."
         if [ -n "$AWS_PROFILE" ]; then
             sam deploy \
@@ -302,31 +302,53 @@ deploy_stack() {
 get_outputs() {
     print_status "Getting stack outputs..."
     
-    STACK_NAME="lambda-opentelemetry-openobserve-demo"
+    STACK_NAME="py-lambda-otel-openobserve-demo"
     
-    # Use profile for AWS CLI commands if set
+    # Use profile and region for AWS CLI commands
     AWS_CLI_PROFILE=""
+    AWS_CLI_REGION=""
     if [ -n "$AWS_PROFILE" ]; then
         AWS_CLI_PROFILE="--profile $AWS_PROFILE"
     fi
+    if [ -n "$AWS_REGION" ]; then
+        AWS_CLI_REGION="--region $AWS_REGION"
+    fi
+    
+    print_status "Querying stack in region: $AWS_REGION with profile: ${AWS_PROFILE:-default}"
     
     API_URL=$(aws cloudformation describe-stacks \
         --stack-name "$STACK_NAME" \
         --query 'Stacks[0].Outputs[?OutputKey==`DemoApiUrl`].OutputValue' \
         --output text \
-        $AWS_CLI_PROFILE)
+        $AWS_CLI_PROFILE $AWS_CLI_REGION 2>/dev/null)
+    
+    if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+        print_error "Failed to get stack outputs. Let's check if stack exists..."
+        
+        # Try to list stacks to debug
+        echo "Checking for stack existence..."
+        aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query 'StackSummaries[?contains(StackName, `py-lambda-otel-openobserve`)].{Name:StackName,Status:StackStatus}' \
+            --output table \
+            $AWS_CLI_PROFILE $AWS_CLI_REGION
+        
+        print_error "Stack query failed. Please check manually:"
+        echo "  aws cloudformation describe-stacks --stack-name $STACK_NAME $AWS_CLI_PROFILE $AWS_CLI_REGION"
+        return 1
+    fi
     
     DEMO_FUNCTION=$(aws cloudformation describe-stacks \
         --stack-name "$STACK_NAME" \
         --query 'Stacks[0].Outputs[?OutputKey==`DemoFunctionName`].OutputValue' \
         --output text \
-        $AWS_CLI_PROFILE)
+        $AWS_CLI_PROFILE $AWS_CLI_REGION)
     
     API_FUNCTION=$(aws cloudformation describe-stacks \
         --stack-name "$STACK_NAME" \
         --query 'Stacks[0].Outputs[?OutputKey==`ApiFunctionName`].OutputValue' \
         --output text \
-        $AWS_CLI_PROFILE)
+        $AWS_CLI_PROFILE $AWS_CLI_REGION)
     
     echo
     echo "🎉 Deployment completed successfully!"
@@ -342,17 +364,17 @@ get_outputs() {
     echo "    curl $API_URL"
     echo
     echo "  Invoke demo function directly:"
-    echo "    aws lambda invoke --function-name $DEMO_FUNCTION --payload '{}' response.json"
+    echo "    aws lambda invoke --function-name $DEMO_FUNCTION --payload '{}' --cli-binary-format raw-in-base64-out $AWS_CLI_PROFILE $AWS_CLI_REGION response.json"
     echo
     echo "  Watch logs:"
-    echo "    sam logs --name $DEMO_FUNCTION --tail"
-    echo "    sam logs --name $API_FUNCTION --tail"
+    echo "    sam logs --name $DEMO_FUNCTION --tail $AWS_CLI_PROFILE $AWS_CLI_REGION"
+    echo "    sam logs --name $API_FUNCTION --tail $AWS_CLI_PROFILE $AWS_CLI_REGION"
     echo
     echo "📊 View in OpenObserve:"
     echo "  Login to: $OPENOBSERVE_BASE_ENDPOINT"
     echo "  Organization: $OPENOBSERVE_ORGANIZATION"
     echo "  Stream: $OPENOBSERVE_STREAM"
-    echo "  Look for logs with service: lambda-openobserve-demo"
+    echo "  Look for logs with service: python-lambda-openobserve-demo"
     echo
 }
 
@@ -360,10 +382,14 @@ get_outputs() {
 test_deployment() {
     print_status "Testing the deployment..."
     
-    # Use profile for AWS CLI commands if set
+    # Use profile and region for AWS CLI commands
     AWS_CLI_PROFILE=""
+    AWS_CLI_REGION=""
     if [ -n "$AWS_PROFILE" ]; then
         AWS_CLI_PROFILE="--profile $AWS_PROFILE"
+    fi
+    if [ -n "$AWS_REGION" ]; then
+        AWS_CLI_REGION="--region $AWS_REGION"
     fi
     
     if [ -n "$API_URL" ]; then
@@ -382,9 +408,9 @@ test_deployment() {
         echo "Testing direct function invocation..."
         aws lambda invoke \
             --function-name "$DEMO_FUNCTION" \
-            --payload '{"test": "deployment"}' \
+            --payload '{"test": "python_deployment"}' \
             --cli-binary-format raw-in-base64-out \
-            $AWS_CLI_PROFILE \
+            $AWS_CLI_PROFILE $AWS_CLI_REGION \
             /tmp/lambda-response.json > /dev/null
         
         if [ $? -eq 0 ]; then
@@ -411,7 +437,7 @@ main() {
     test_deployment
     cleanup
     
-    print_status "🎯 Deployment process completed!"
+    print_status "🎯 Python Lambda deployment process completed!"
     echo
     echo "Next steps:"
     echo "1. Test the API endpoint with the provided curl command"
